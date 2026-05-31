@@ -1,45 +1,168 @@
 name: Build Artifacts
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  linux:
+    name: Linux Build
     runs-on: ubuntu-latest
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
-    - name: List files for debug
-      run: |
-        echo "--- ROOT ---"
-        ls -la
-        echo "--- web ---"
-        ls -la web || true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: latest
 
-    # 👇 Adjust based on actual location
-    - name: Build Frontend (default)
-      run: |
-        cd web/default
-        npm install
-        npm run build
+      - name: Build Frontend (default)
+        env:
+          CI: ""
+        run: |
+          cd web/default
+          bun install
+          DISABLE_ESLINT_PLUGIN='true' bun run build
+          cd ../..
 
-    - name: Build Frontend (classic)
-      run: |
-        cd web/classic
-        npm install
-        npm run build
+      - name: Build Frontend (classic)
+        env:
+          CI: ""
+        run: |
+          cd web/classic
+          bun install
+          bun run build
+          cd ../..
 
-    - name: Build Backend
-      run: |
-        go build -o new-api-linux
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '>=1.25.1'
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: build
-        path: |
-          web/default/build
-          web/classic/build
-          new-api-linux
+      - name: Build Backend (amd64)
+        run: |
+          go mod download
+          go build -ldflags "-s -w -extldflags '-static'" -o new-api-linux-amd64
+
+      - name: Build Backend (arm64)
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
+          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -extldflags '-static'" -o new-api-linux-arm64
+
+      - name: Generate checksums
+        run: sha256sum new-api-linux-* > checksums-linux.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            new-api-linux-*
+            checksums-linux.txt
+
+  macos:
+    name: macOS Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: latest
+
+      - name: Build Frontend (default)
+        env:
+          CI: ""
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: |
+          cd web/default
+          bun install
+          DISABLE_ESLINT_PLUGIN='true' bun run build
+          cd ../..
+
+      - name: Build Frontend (classic)
+        env:
+          CI: ""
+        run: |
+          cd web/classic
+          bun install
+          bun run build
+          cd ../..
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '>=1.25.1'
+
+      - name: Build Backend
+        run: |
+          go mod download
+          go build -ldflags "-s -w" -o new-api-macos
+
+      - name: Generate checksums
+        run: shasum -a 256 new-api-macos > checksums-macos.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            new-api-macos
+            checksums-macos.txt
+
+  windows:
+    name: Windows Build
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: latest
+
+      - name: Build Frontend (default)
+        env:
+          CI: ""
+        run: |
+          cd web/default
+          bun install
+          DISABLE_ESLINT_PLUGIN='true' bun run build
+          cd ../..
+
+      - name: Build Frontend (classic)
+        env:
+          CI: ""
+        run: |
+          cd web/classic
+          bun install
+          bun run build
+          cd ../..
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '>=1.25.1'
+
+      - name: Build Backend
+        run: |
+          go mod download
+          go build -ldflags "-s -w" -o new-api-windows.exe
+
+      - name: Generate checksums
+        run: sha256sum new-api-windows.exe > checksums-windows.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            new-api-windows.exe
+            checksums-windows.txt
